@@ -3,6 +3,7 @@ package deej
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -56,6 +57,15 @@ func newSessionFinder(logger *zap.SugaredLogger) (SessionFinder, error) {
 
 func (sf *wcaSessionFinder) GetAllSessions() ([]Session, error) {
 	sessions := []Session{}
+
+	// COM apartment state is tied to the OS thread, not the goroutine - if the go
+	// runtime moves this goroutine to a different OS thread partway through (which
+	// it's free to do, e.g. after a blocking syscall), later COM calls below will
+	// run on a thread that never had CoInitializeEx called on it and fail with
+	// "CoInitialize has not been called". Pin this goroutine to its current OS
+	// thread for the entire duration of this call to guarantee that can't happen.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 
 	// we must call this every time we're about to list devices, i think. could be wrong
 	if err := ole.CoInitializeEx(0, ole.COINIT_APARTMENTTHREADED); err != nil {
